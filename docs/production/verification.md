@@ -26,3 +26,5 @@ Screenshots under `docs/screenshots/` and synthetic PDFs/validation output under
 No public production server was deployed. Configure your domain, HTTPS proxy and backups before admitting real students. Real phone/ZipGrade scans and representative teacher/student research were not possible here and are not counted as completed. The completed backlog percentage is a count of documented outcomes, not a percentage estimate of quality or interoperability.
 
 Final local run: **32/32 checks pass**, including real Chromium PDFs, keys/sheets and a deliberately oversized question. A clean clone skips the optional proprietary-sample check and runs 31 tests.
+
+GitHub Linux CI passed for source commit `8f80fc0`: [build, tests, Docker/PostgreSQL/PDF smoke run](https://github.com/juangrukat/classpaper/actions/runs/38336360147). The clean runner passed all 31 distributable checks and skipped only the optional proprietary-sample migration check. Temporary local QA containers and the dedicated VM were stopped after verification; the embedded-data preview remains running.

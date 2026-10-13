@@ -65,3 +65,5 @@ Verify sign-in, test contents, student results, grade overrides, print versions,
 - Configure a server disk quota. Each teacher's retained import archive is capped at 200 MB of encoded data. Questions/pictures currently live in JSON, so this release fits modest classroom libraries.
 - A 50-student simultaneous start/save/submit check passed on the test deployment. It does not establish capacity for a district or continuous high-volume use.
 - Review `backlog.md` before claiming full original-app parity. Real teacher/student usability, broader migration/engine compatibility, arbitrary table layouts and phone scanning remain open.
+
+Embedded local storage uses a single process. For local operator recovery, stop the app before running `DATA_DIR=/your/same/data/directory npm run recover -- teacher@school.example`, then restart it. Never open or copy an active embedded database from a second process. Production Compose uses external PostgreSQL and supports the recovery command while the app is running.

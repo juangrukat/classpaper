@@ -63,7 +63,7 @@ A clean clone runs 31 checks and skips one optional migration check that require
 
 Completed **24/30 documented outstanding outcomes (80%)**, including container/PostgreSQL/restore validation, account recovery, classroom controls, PDF rendering and high-value editing improvements. [Tracked backlog and acceptance evidence](docs/production/backlog.md).
 
-A 50-student concurrent start/save/submit check passed with no failed requests. Chromium-generated 45-question PDFs were checked for A4/Letter paper in one/two columns. Local tests exercise security boundaries, recovery token rotation, grade limits and retained-file ownership. CI builds/tests the source and runs a Docker/PostgreSQL smoke test.
+A 50-student concurrent start/save/submit check passed with no failed requests. Chromium-generated 45-question PDFs were checked for A4/Letter paper in one/two columns. Local tests exercise security boundaries, recovery token rotation, grade limits and retained-file ownership. [Linux CI passed](https://github.com/juangrukat/classpaper/actions/runs/38336360147), including source tests, Docker image launch, PostgreSQL workflow and PDF generation.
 
 Six outcomes remain open: broader GIFT/QTI interoperability, fuller Schoolhouse migration, arbitrary table layouts, actual ZipGrade scanning and representative teacher/student usability/accessibility testing. Configure your real domain, HTTPS and backups before admitting real students; no public production server has been deployed.
 
