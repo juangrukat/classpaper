@@ -1,12 +1,11 @@
+import { pdfRoutes } from "./pdf.js";
+import { exportCsv } from "./spreadsheet.js";
+import { classroomRoutes } from "./classroom.js";
+import { passwordHash, passwordMatches, accountRoutes } from "./accounts.js";
 import express from "express";
-import {
-  randomBytes,
-  scryptSync,
-  timingSafeEqual,
-  createHash,
-} from "node:crypto";
+import { randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import path from "node:path";
-import { query, init, transaction } from "./db.js";
+import { query, init, transaction, closeDatabase } from "./db.js";
 import {
   testSchema,
   settingsSchema,
@@ -31,17 +30,53 @@ import {
 import { cleanQuestions } from "./content.js";
 import { qtiPackage } from "./qti.js";
 await init();
+await query("DELETE FROM sessions WHERE expires<$1", [Date.now()]);
+await query("DELETE FROM password_resets WHERE expires<$1", [Date.now()]);
+await query("DELETE FROM attempt_recovery WHERE expires<$1", [Date.now()]);
 const app = express();
 app.disable("x-powered-by");
+if (process.env.TRUST_PROXY)
+  app.set("trust proxy", Number(process.env.TRUST_PROXY));
+if (
+  process.env.NODE_ENV === "production" &&
+  process.env.PUBLIC_URL?.startsWith("https://") &&
+  process.env.COOKIE_SECURE !== "true"
+)
+  throw new Error("HTTPS hosting requires COOKIE_SECURE=true.");
+app.get("/health/live", (_req, res) => res.json({ ok: true }));
+app.get("/health/ready", async (_req, res) => {
+  try {
+    await query("SELECT 1");
+    res.json({ ok: true });
+  } catch {
+    res.status(503).json({ ok: false });
+  }
+});
 app.use(express.json({ limit: "26mb" }));
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "same-origin");
   res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()",
+  );
+  if (process.env.NODE_ENV === "production")
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    );
+  if (process.env.COOKIE_SECURE === "true")
+    res.setHeader("Strict-Transport-Security", "max-age=31536000");
   next();
 });
 app.use("/api", (req, res, next) => {
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    if (req.headers["sec-fetch-site"] === "cross-site") {
+      res.status(403).json({ error: "Cross-site writes are blocked." });
+      return;
+    }
     const origin = req.headers.origin;
     if (
       origin &&
@@ -70,6 +105,8 @@ function rate(
   res: express.Response,
   next: express.NextFunction,
 ) {
+  if (limits.size > 10000)
+    for (const [k, v] of limits) if (v.until < Date.now()) limits.delete(k);
   const key = req.baseUrl + ":" + (req.ip || "local");
   const now = Date.now();
   let l = limits.get(key);
@@ -86,8 +123,13 @@ function rate(
 app.use("/api/auth", rate);
 app.use("/api/join", rate);
 async function user(req: express.Request) {
-  const rows = await query<{ id: string; email: string; name: string }>(
-    `SELECT u.id,u.email,u.name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires>$2`,
+  const rows = await query<{
+    id: string;
+    email: string;
+    name: string;
+    admin: boolean;
+  }>(
+    `SELECT u.id,u.email,u.name,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires>$2 AND u.disabled=false`,
     [hash(cookie(req)), Date.now()],
   );
   return rows[0];
@@ -110,16 +152,6 @@ app.get("/api/auth/me", async (req, res) =>
 app.post("/api/auth/register", async (req, res) => {
   const { email, name, password } = req.body;
   if (
-    process.env.ALLOW_REGISTRATION !== "true" &&
-    (await query("SELECT id FROM users LIMIT 1")).length
-  ) {
-    res.status(403).json({
-      error:
-        "New teacher registration is closed. Ask the server administrator to enable it.",
-    });
-    return;
-  }
-  if (
     typeof email !== "string" ||
     !/^\S+@\S+\.\S+$/.test(email) ||
     email.length > 200 ||
@@ -136,23 +168,39 @@ app.post("/api/auth/register", async (req, res) => {
     });
     return;
   }
-  const salt = token();
-  try {
+  const savedPassword = await passwordHash(password);
+  const created = await transaction(async (tx) => {
+    await tx("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE");
+    const users = await tx("SELECT id FROM users LIMIT 1");
+    if (users.length && process.env.ALLOW_REGISTRATION !== "true") return null;
     const id = crypto.randomUUID();
-    await query(
-      "INSERT INTO users(id,email,name,password) VALUES($1,$2,$3,$4)",
+    const [u] = await tx(
+      "INSERT INTO users(id,email,name,password,admin) VALUES($1,$2,$3,$4,$5) ON CONFLICT(email) DO NOTHING RETURNING id,email,name,admin",
       [
         id,
-        email.toLowerCase(),
+        email.trim().toLowerCase(),
         name.trim(),
-        salt + ":" + scryptSync(password, salt, 64).toString("hex"),
+        savedPassword,
+        !users.length,
       ],
     );
-    await login(res, id);
-    res.json({ user: { id, email: email.toLowerCase(), name: name.trim() } });
-  } catch {
-    res.status(409).json({ error: "This email is already registered." });
+    return u || undefined;
+  });
+  if (created === null) {
+    res
+      .status(403)
+      .json({
+        error:
+          "New teacher registration is closed. Ask the server administrator to enable it.",
+      });
+    return;
   }
+  if (created === undefined) {
+    res.status(409).json({ error: "This email is already registered." });
+    return;
+  }
+  await login(res, String(created.id));
+  res.json({ user: created });
 });
 async function login(res: express.Response, id: string) {
   const t = token();
@@ -184,26 +232,28 @@ app.post("/api/auth/login", async (req, res) => {
     email: string;
     name: string;
     password: string;
+    admin: boolean;
+    disabled: boolean;
   }>("SELECT * FROM users WHERE email=$1", [email.toLowerCase()]);
-  const [salt, saved] = (u?.password || `${token()}:${"0".repeat(128)}`).split(
-    ":",
-  );
-  const good = timingSafeEqual(
-    scryptSync(password, salt, 64),
-    Buffer.from(saved, "hex"),
-  );
-  if (!u || !good) {
+  const good = await passwordMatches(password, u?.password);
+  if (!u || !good || u.disabled) {
     res.status(401).json({ error: "The email or password does not match." });
     return;
   }
   await login(res, u.id);
-  res.json({ user: { id: u.id, email: u.email, name: u.name } });
+  res.json({
+    user: { id: u.id, email: u.email, name: u.name, admin: u.admin },
+  });
 });
 app.post("/api/auth/logout", async (req, res) => {
   await query("DELETE FROM sessions WHERE token=$1", [hash(cookie(req))]);
   res.clearCookie("classpaper", { path: "/" });
   res.json({ ok: true });
 });
+app.use("/api/admin", rate);
+accountRoutes(app, auth);
+classroomRoutes(app, auth);
+pdfRoutes(app, auth);
 app.use("/api/tests", auth);
 app.use("/api/presets", auth);
 app.use("/api/bank", auth);
@@ -361,6 +411,10 @@ app.get("/api/tests/:id/export/:format", async (req, res) => {
     res.status(404).json({ error: "Test not found." });
     return;
   }
+  if (req.params.format === "csv") {
+    res.json(exportCsv(row.doc.questions));
+    return;
+  }
   if (req.params.format === "gift") {
     res.json(exportGift(row.doc.questions));
     return;
@@ -398,7 +452,54 @@ app.post("/api/import", async (req, res) => {
   const buffer = Buffer.from(req.body.data, "base64");
   if (buffer.length > 15_000_000)
     throw new Error("Choose a file smaller than 15 MB.");
-  res.json(await readFile(req.body.name, buffer, req.body.csv));
+  const report = await readFile(req.body.name, buffer, req.body.csv);
+  const sourceId = crypto.randomUUID();
+  await transaction(async (tx) => {
+    await tx("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
+      res.locals.user.id,
+    ]);
+    const [size] = await tx<{ total: string }>(
+      "SELECT COALESCE(sum(length(data)),0)::text AS total FROM import_sources WHERE user_id=$1",
+      [res.locals.user.id],
+    );
+    if (Number(size.total) + buffer.toString("base64").length > 200000000)
+      throw new Error(
+        "Your import archive is full. Ask the administrator to archive old source files.",
+      );
+    await tx(
+      "INSERT INTO import_sources(id,user_id,name,data) VALUES($1,$2,$3,$4)",
+      [
+        sourceId,
+        res.locals.user.id,
+        req.body.name.slice(0, 200),
+        buffer.toString("base64"),
+      ],
+    );
+  });
+  res.json({ ...report, sourceId });
+});
+app.get("/api/import/sources", async (_req, res) =>
+  res.json(
+    await query(
+      "SELECT id,name,created_at FROM import_sources WHERE user_id=$1 ORDER BY created_at DESC",
+      [res.locals.user.id],
+    ),
+  ),
+);
+app.get("/api/import/sources/:id", async (req, res) => {
+  const [row] = await query<{ name: string; data: string }>(
+    "SELECT name,data FROM import_sources WHERE id=$1 AND user_id=$2",
+    [req.params.id, res.locals.user.id],
+  );
+  if (!row) {
+    res.status(404).json({ error: "Source not found." });
+    return;
+  }
+  res.setHeader(
+    "Content-Disposition",
+    "attachment; filename*=UTF-8''" + encodeURIComponent(row.name),
+  );
+  res.type("application/octet-stream").send(Buffer.from(row.data, "base64"));
 });
 app.get("/api/template.csv", (_req, res) =>
   res.type("text/csv").send(csvTemplate),
@@ -670,6 +771,18 @@ app.put("/api/attempts/:id/answers", async (req, res) => {
     ))
       throw new Error("Invalid response value.");
   }
+  for (const q of a.questions) {
+    const v = responses[q.id];
+    if (
+      q.type === "diagram" &&
+      v &&
+      typeof v === "object" &&
+      !Array.isArray(v) &&
+      v.image &&
+      (v.image.length > 400000 || !safeImage(v.image))
+    )
+      throw new Error("Use a PNG, JPEG or WebP drawing smaller than 300 KB.");
+  }
   const rows = await query(
     `UPDATE attempts SET responses=$1 WHERE id=$2 AND status='active' AND (deadline IS NULL OR deadline>$3) RETURNING id`,
     [JSON.stringify(responses), a.id, Date.now()],
@@ -690,6 +803,10 @@ app.post("/api/attempts/:id/submit", async (req, res) => {
   res.json({ submitted: true });
 });
 export function answerText(q: Question) {
+  if (q.type === "selection" && q.selections?.length)
+    return q.selections
+      .map((s) => s.choices.find((c) => c.correct)?.text || "")
+      .join("; ");
   if (["multiple", "truefalse", "selection", "checklist"].includes(q.type))
     return q.choices
       .filter((c) => c.correct)
@@ -768,7 +885,32 @@ app.put("/api/results/:code/:id/grade", async (req, res) => {
     feedback.length > 10000
   )
     throw new Error("Enter a mark within the question total.");
-  const override = { earned, feedback };
+  const parts = req.body.parts;
+  if (parts !== undefined) {
+    if (
+      q.type !== "multipart" ||
+      !parts ||
+      typeof parts !== "object" ||
+      Array.isArray(parts) ||
+      Object.keys(parts).length !== q.pairs.length ||
+      q.pairs.some(
+        (p) =>
+          typeof parts[p.id] !== "number" ||
+          !Number.isFinite(parts[p.id]) ||
+          parts[p.id] < 0 ||
+          parts[p.id] > (p.marks ?? 1),
+      ) ||
+      Object.keys(parts).some((id) => !q.pairs.some((p) => p.id === id)) ||
+      Math.abs(
+        Object.values(parts).reduce((sum: number, v) => sum + Number(v), 0) -
+          earned,
+      ) > 0.00001
+    )
+      throw new Error(
+        "Grade every part within its marks. The total must match.",
+      );
+  }
+  const override = { earned, feedback, ...(parts ? { parts } : {}) };
   await transaction(async (tx) => {
     const [current] = await tx<Attempt>(
       "SELECT * FROM attempts WHERE id=$1 FOR UPDATE",
@@ -804,7 +946,27 @@ app.use(
     res: express.Response,
     _next: express.NextFunction,
   ) => {
-    const e = err as { issues?: unknown[]; message?: string };
+    const e = err as {
+      issues?: unknown[];
+      message?: string;
+      code?: string;
+      status?: number;
+      type?: string;
+    };
+    if (e.type === "entity.too.large") {
+      res.status(413).json({ error: "This request is too large." });
+      return;
+    }
+    if (e.code) {
+      console.error("Server operation failed", e.code);
+      res
+        .status(500)
+        .json({
+          error:
+            "The server could not complete this request. Please try again.",
+        });
+      return;
+    }
     res.status(400).json({
       error: e.issues
         ? "Some fields are invalid. Please check the question and settings."
@@ -829,4 +991,16 @@ const port = Number(process.env.PORT) || 3100;
 const server = app.listen(port, process.env.HOST || "127.0.0.1", () =>
   console.log(`Classpaper ready: http://localhost:${port}`),
 );
-process.on("SIGTERM", () => server.close(() => process.exit(0)));
+let stopping = false;
+async function shutdown() {
+  if (stopping) return;
+  stopping = true;
+  const timer = setTimeout(() => process.exit(1), 15000).unref();
+  server.close(async () => {
+    await closeDatabase();
+    clearTimeout(timer);
+    process.exit(0);
+  });
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

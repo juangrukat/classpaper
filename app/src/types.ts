@@ -5,7 +5,7 @@ import type {
   ResponseValue,
   TestDoc,
 } from "./domain";
-export type User = { name: string; email: string; id: string };
+export type User = { name: string; email: string; id: string; admin?: boolean };
 export type Test = TestDoc & { revision: number };
 export type TestSummary = {
   id: string;
@@ -48,7 +48,11 @@ export type ResultAttempt = {
   responses: Record<string, ResponseValue>;
   status: string;
   grades: Record<string, Grade>;
-  overrides: Record<string, { earned: number; feedback: string }>;
+  overrides: Record<
+    string,
+    { earned: number; feedback: string; parts?: Record<string, number> }
+  >;
   started: string;
+  deadline: string | null;
 };
 export type ResultSet = { title: string; attempts: ResultAttempt[] };

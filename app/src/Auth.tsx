@@ -93,6 +93,7 @@ export function Auth({
             <ArrowRight size={17} />
           </Button>
         </form>
+        {!register && <p className="muted">Forgot your password? Ask your server administrator for a single-use recovery link.</p>}
         <button
           className="text-button"
           onClick={() => {

@@ -2,12 +2,19 @@ services:
   app:
     build: .
     restart: unless-stopped
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    shm_size: 256mb
+    mem_limit: 1g
+    pids_limit: 256
     ports:
       - "127.0.0.1:3100:3100"
     environment:
       DATABASE_URL: postgres://classpaper:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/classpaper
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3100}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
     depends_on:
       db:

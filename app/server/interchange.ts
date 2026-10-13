@@ -1,3 +1,4 @@
+import { readAiken } from "./spreadsheet.js";
 import { readQtiItem, readQtiPackage } from "./qti.js";
 import { parser } from "gift-parser-ide";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
@@ -162,6 +163,7 @@ export function exportGift(questions: Question[]): {
   const warnings: string[] = [];
   let category = "";
   for (const [i, q] of questions.entries()) {
+    if(q.selections?.length){warnings.push(`Question ${i+1}: multiple inline choice sets require native ZIP; skipped.`);continue;}
     if (q.matchOptions?.some((x) => x.trim()))
       warnings.push(
         `Question ${i + 1}: additional unused match choices are not carried by GIFT.`,
@@ -340,18 +342,19 @@ export function readCsv(text: string, options?: CsvOptions): ImportReport {
         {
           id: crypto.randomUUID(),
           text: "True",
-          correct: get("answer").toLowerCase() === "true",
+          correct: /^(true|a)$/i.test(get("answer")),
           locked: false,
         },
         {
           id: crypto.randomUUID(),
           text: "False",
-          correct: get("answer").toLowerCase() === "false",
+          correct: /^(false|b)$/i.test(get("answer")),
           locked: false,
         },
       ];
     } else {
       q.answer = get("answer");
+      q.tolerance=Number(get("tolerance")||0);
       q.manual = type === "short" && !q.answer;
     }
     const parsed = questionSchema.safeParse(q);
@@ -535,6 +538,7 @@ export async function readFile(
     return nativeReport(JSON.parse(text));
   if (name.toLowerCase().endsWith(".tst")) return readSchoolhouse(text);
   if (/\.(csv|tsv)$/i.test(name)) return readCsv(text, csvOptions);
+  if (/\.(aiken|txt)$/i.test(name) && /^ANSWER:\s*[A-Z]\s*$/im.test(text)) return readAiken(text);
   if (/\.xml$/i.test(name)) return readQtiItem(text);
   return readGift(text);
 }

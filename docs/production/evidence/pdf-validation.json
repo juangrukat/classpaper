@@ -1,0 +1,37 @@
+[
+  {
+    "file": "Letter-1.pdf",
+    "pages": 10,
+    "all45QuestionsPresent": true,
+    "pageWidth": 612.0,
+    "pageHeight": 792.0
+  },
+  {
+    "file": "A4-2.pdf",
+    "pages": 5,
+    "all45QuestionsPresent": true,
+    "pageWidth": 594.95996,
+    "pageHeight": 841.91998
+  },
+  {
+    "file": "Letter-2.pdf",
+    "pages": 5,
+    "all45QuestionsPresent": true,
+    "pageWidth": 612.0,
+    "pageHeight": 792.0
+  },
+  {
+    "file": "A4-1.pdf",
+    "pages": 10,
+    "all45QuestionsPresent": true,
+    "pageWidth": 594.95996,
+    "pageHeight": 841.91998
+  },
+  {
+    "file": "container-print.pdf",
+    "pages": 1,
+    "all45QuestionsPresent": false,
+    "pageWidth": 594.95996,
+    "pageHeight": 841.91998
+  }
+]

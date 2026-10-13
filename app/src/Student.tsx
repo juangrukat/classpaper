@@ -23,6 +23,7 @@ export function Student({ code }: { code: string }) {
     [name, setName] = useState(""),
     [studentId, setStudentId] = useState(""),
     [accessCode, setAccessCode] = useState(""),
+    [recoveryCode, setRecoveryCode] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [responses, setResponses] = useState<Record<string, ResponseValue>>({}),
@@ -157,6 +158,22 @@ export function Student({ code }: { code: string }) {
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (!credentials || attempt?.status !== "active") return;
+    const timer = setInterval(
+      () =>
+        api<AttemptView>(`/attempts/${credentials.id}`, {
+          headers: { "X-Attempt-Token": credentials.token },
+        })
+          .then((a) => {
+            offset.current = a.serverNow - Date.now();
+            setAttempt(a);
+          })
+          .catch((e) => setError(e.message)),
+      15000,
+    );
+    return () => clearInterval(timer);
+  }, [credentials?.id, attempt?.status]);
   const answered =
     attempt?.questions.filter((q) => hasAnswer(responses[q.id], q)).length || 0;
   const remaining = attempt?.deadline
@@ -170,6 +187,54 @@ export function Student({ code }: { code: string }) {
       </header>
       <div className="student-container">
         <ErrorBox error={error} />
+        {!attempt && (
+          <details className="join-card">
+            <summary>
+              Continue on this device with a teacher recovery code
+            </summary>
+            <label>
+              Recovery code
+              <input
+                value={recoveryCode}
+                onChange={(e) => setRecoveryCode(e.target.value)}
+                autoComplete="off"
+              />
+            </label>
+            <Button
+              secondary
+              disabled={busy || !recoveryCode}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  const c = await api<{
+                    id: string;
+                    token: string;
+                    code: string;
+                  }>(
+                    "/join/recover",
+                    send("POST", { recoveryCode: recoveryCode.trim(), code }),
+                  );
+                  if (c.code !== code)
+                    throw new Error(
+                      "This code belongs to another test. Open its student link.",
+                    );
+                  localStorage.setItem(
+                    `classpaper:attempt:${code}`,
+                    JSON.stringify(c),
+                  );
+                  await load(c);
+                  setError("");
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Resume my test
+            </Button>
+          </details>
+        )}
         {attempt?.status === "submitted" ? (
           <div className="submitted-card">
             <div className="submitted-check">
@@ -247,13 +312,16 @@ export function Student({ code }: { code: string }) {
                   <QuestionText
                     q={q}
                     slot={
-                      q.type === "selection" ? (
-                        <InlineChoice
-                          q={q}
-                          value={responses[q.id]}
-                          change={(v) => change(q.id, v)}
-                        />
-                      ) : undefined
+                      q.type === "selection"
+                        ? (index: number) => (
+                            <InlineChoice
+                              index={index}
+                              q={q}
+                              value={responses[q.id]}
+                              change={(v) => change(q.id, v)}
+                            />
+                          )
+                        : undefined
                     }
                   />
                 </div>

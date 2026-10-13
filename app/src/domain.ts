@@ -54,6 +54,15 @@ export const questionSchema = z.object({
   marks: z.number().min(0).max(1000),
   choices: z.array(choiceSchema).max(100),
   answer: z.string().max(20000),
+  selections: z
+    .array(
+      z.object({
+        id: z.string(),
+        choices: z.array(choiceSchema).min(2).max(20),
+      }),
+    )
+    .max(20)
+    .default([]),
   pairs: z
     .array(
       z.object({
@@ -95,6 +104,7 @@ export type Question = z.infer<typeof questionSchema>;
 export const settingsSchema = z.object({
   shuffleQuestions: z.boolean(),
   shuffleChoices: z.boolean(),
+  shuffleWithinGroups: z.boolean().default(false),
   timeLimit: z.number().int().min(0).max(600),
   feedback: z.enum(["score", "answers", "none"]),
   accessCode: z.string().max(100),
@@ -108,6 +118,8 @@ export const settingsSchema = z.object({
   subNumber: z.boolean().default(false),
   verticalMarks: z.boolean().default(false),
   backgroundImage: z.string().max(4000000).default(""),
+  titleStyle: z.enum(["classic", "compact", "exam"]).default("classic"),
+  sheetStyle: z.enum(["standard", "compact", "lined"]).default("standard"),
   questionSpacing: z.number().min(5).max(60).default(22),
 });
 export type Settings = z.infer<typeof settingsSchema>;
@@ -131,6 +143,9 @@ export type TestDoc = z.infer<typeof testSchema> & {
 export const defaults: Settings = {
   shuffleQuestions: false,
   shuffleChoices: false,
+  shuffleWithinGroups: false,
+  titleStyle: "classic",
+  sheetStyle: "standard",
   timeLimit: 0,
   feedback: "score",
   accessCode: "",
@@ -178,6 +193,7 @@ export function newQuestion(type: Kind = "multiple"): Question {
             locked: false,
           })),
     answer: "",
+    selections: [],
     pairs: [],
     table: [],
     matchOptions: [],
@@ -196,7 +212,10 @@ export function newQuestion(type: Kind = "multiple"): Question {
 export function errorsFor(q: Question): string[] {
   const e: string[] = [];
   if (!q.text.trim()) e.push("Add the question text.");
-  if (["multiple", "truefalse", "selection", "checklist"].includes(q.type)) {
+  if (
+    ["multiple", "truefalse", "selection", "checklist"].includes(q.type) &&
+    !(q.type === "selection" && q.selections?.length)
+  ) {
     if (q.choices.length < 2 || q.choices.some((c) => !c.text.trim()))
       e.push("Add at least two complete choices.");
     if (!q.choices.some((c) => c.correct)) e.push("Mark the correct answer.");
@@ -228,8 +247,21 @@ export function errorsFor(q: Question): string[] {
     !Number.isFinite(Number(q.answer))
   )
     e.push("Enter a numeric answer.");
-  if (q.type === "selection" && q.text.split("___").length !== 2)
-    e.push("Inline selection needs exactly one ___ placeholder.");
+  if (q.type === "selection") {
+    if (q.text.split("___").length - 1 !== (q.selections?.length || 1))
+      e.push("Provide one choice set per ___ placeholder.");
+    if (
+      q.selections?.some(
+        (s) =>
+          s.choices.filter((c) => c.correct).length !== 1 ||
+          s.choices.some((c) => !c.text.trim()) ||
+          new Set(s.choices.map((c) => c.id)).size !== s.choices.length,
+      ) ||
+      new Set((q.selections || []).map((s) => s.id)).size !==
+        (q.selections || []).length
+    )
+      e.push("Each blank needs unique choices and exactly one correct answer.");
+  }
   if (["blanks", "selection"].includes(q.type) && !q.text.includes("___"))
     e.push("Use ___ to mark the blank in the question.");
   if (
@@ -297,6 +329,15 @@ export function grade(q: Question, value: ResponseValue | undefined): Grade {
     (q.type === "short" && q.manual)
   )
     return { earned: 0, possible: q.marks, manual: true, correct: null };
+  if (q.type === "selection" && q.selections?.length)
+    return result(
+      typeof value === "object" &&
+        !Array.isArray(value) &&
+        value !== null &&
+        q.selections.every((s) =>
+          s.choices.some((c) => c.correct && c.id === value[s.id]),
+        ),
+    );
   if (["multiple", "truefalse", "selection", "checklist"].includes(q.type)) {
     const a = Array.isArray(value)
       ? value
@@ -373,12 +414,14 @@ export type PublicQuestion = Omit<
   | "imageOriginal"
   | "imageRecipe"
   | "matchOptions"
+  | "selections"
 > & {
   choices: { id: string; text: string }[];
   pairs: { id: string; left: string; marks?: number }[];
   table: Question["table"];
   options: string[];
   multiple: boolean;
+  selections: { id: string; choices: { id: string; text: string }[] }[];
 };
 export function publicQuestion(
   q: Question,
@@ -395,10 +438,15 @@ export function publicQuestion(
     imageOriginal,
     imageRecipe,
     matchOptions,
+    selections,
     ...rest
   } = q;
   return {
     ...rest,
+    selections: (selections || []).map((s) => ({
+      id: s.id,
+      choices: s.choices.map(({ id, text }) => ({ id, text })),
+    })),
     choices: choices.map(({ id, text }) => ({ id, text })),
     pairs: pairs.map(({ id, left, marks }) => ({
       id,
@@ -435,14 +483,19 @@ export function materialize(
   settings: Settings,
 ): Question[] {
   let qs = structuredClone(questions);
-  if (settings.shuffleQuestions) {
+  if (settings.shuffleQuestions || settings.shuffleWithinGroups) {
     const units: Question[][] = [];
     for (const q of qs) {
       const last = units.at(-1);
       if (q.group && last?.[0].group === q.group) last.push(q);
       else units.push([q]);
     }
-    qs = shuffle(units).flat();
+    const arranged = settings.shuffleQuestions ? shuffle(units) : units;
+    qs = arranged
+      .map((unit) =>
+        settings.shuffleWithinGroups && unit[0].group ? shuffle(unit) : unit,
+      )
+      .flat();
   }
   qs = qs.map((q) => {
     if (!q.choiceLimit || q.choiceLimit >= q.choices.length) return q;

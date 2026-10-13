@@ -14,7 +14,12 @@ import type { Test } from "./types";
 
 export function PrintPage({ id }: { id: string }) {
   const [doc, setDoc] = useState<(Test & { version: string }) | null>(null),
-    [mode, setMode] = useState<"test" | "key" | "sheet">("test"),
+    [mode, setMode] = useState<"test" | "key" | "sheet">(() => {
+      const m = new URLSearchParams(location.search).get("mode");
+      return m === "key" || m === "sheet" ? m : "test";
+    }),
+    [warnings, setWarnings] = useState<string[]>([]),
+    [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   useEffect(() => {
     const version = new URLSearchParams(location.search).get("v");
@@ -83,6 +88,53 @@ export function PrintPage({ id }: { id: string }) {
             <Download size={16} />
             ZipGrade key CSV
           </Button>
+          <Button
+            secondary
+            disabled={!doc || busy}
+            onClick={async () => {
+              if (!doc) return;
+              setBusy(true);
+              try {
+                const r = await fetch(
+                  `/api/tests/${id}/pdf/${doc.version}?mode=${mode}`,
+                );
+                if (!r.ok) throw new Error((await r.json()).error);
+                download(`${doc.title}-${mode}.pdf`, await r.blob());
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Download PDF
+          </Button>
+          <Button
+            secondary
+            disabled={!doc || busy}
+            onClick={async () => {
+              if (!doc) return;
+              setBusy(true);
+              try {
+                const r = await api<{ warnings: string[] }>(
+                  `/tests/${id}/pdf/${doc.version}?mode=${mode}&check=1`,
+                );
+                setWarnings(
+                  r.warnings.length
+                    ? r.warnings
+                    : [
+                        "No horizontal overflow or oversized question blocks found.",
+                      ],
+                );
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Check print layout
+          </Button>
           <Button onClick={() => window.print()}>
             <Printer size={17} />
             Print / Save as PDF
@@ -107,11 +159,20 @@ export function PrintPage({ id }: { id: string }) {
         versions. Real scanning has not been validated here.
       </div>
       <ErrorBox error={error} />
+      {!!warnings.length && (
+        <div className="print-controls" role="status">
+          {warnings.map((w, i) => (
+            <p key={i}>{w}</p>
+          ))}
+        </div>
+      )}
       {doc && (
         <>
           <style>{`@page {size: ${doc.settings.paper};margin:16mm;} @media print {.printed-paper{width:auto!important;min-height:0!important;}}`}</style>
           <article
-            className="printed-paper"
+            data-print-ready="true"
+            data-paper={doc.settings.paper}
+            className={`printed-paper title-${doc.settings.titleStyle || "classic"} sheet-${mode === "sheet" ? doc.settings.sheetStyle : "standard"}`}
             style={{ width: doc.settings.paper === "A4" ? "210mm" : "216mm" }}
           >
             {doc.settings.backgroundImage && (
@@ -167,18 +228,23 @@ export function PrintPage({ id }: { id: string }) {
                           <QuestionText
                             q={q}
                             slot={
-                              q.type === "selection" && mode === "test" ? (
-                                <span className="printed-inline-choice">
-                                  [
-                                  {q.choices
-                                    .map(
-                                      (c, i) =>
-                                        `${String.fromCharCode(65 + i)}. ${c.text}`,
-                                    )
-                                    .join(" / ")}
-                                  ]
-                                </span>
-                              ) : undefined
+                              q.type === "selection" && mode === "test"
+                                ? (index: number) => (
+                                    <span className="printed-inline-choice">
+                                      [
+                                      {(
+                                        q.selections?.[index]?.choices ||
+                                        q.choices
+                                      )
+                                        .map(
+                                          (c, i) =>
+                                            `${String.fromCharCode(65 + i)}. ${c.text}`,
+                                        )
+                                        .join(" / ")}
+                                      ]
+                                    </span>
+                                  )
+                                : undefined
                             }
                           />
                         )}
@@ -207,6 +273,21 @@ export function PrintPage({ id }: { id: string }) {
                       <strong>Answer:</strong>{" "}
                       {printKey(q) || "Teacher grading"}
                       {q.notes && <p>Notes: {q.notes}</p>}
+                    </div>
+                  ) : q.type === "selection" && q.selections?.length ? (
+                    <div>
+                      {q.selections.map((s, j) => (
+                        <p key={s.id}>
+                          Blank {j + 1}:{" "}
+                          {s.choices
+                            .map(
+                              (c, k) =>
+                                `${String.fromCharCode(65 + k)}. ${mode === "sheet" ? "" : c.text}`,
+                            )
+                            .join(" / ")}{" "}
+                          _____
+                        </p>
+                      ))}
                     </div>
                   ) : [
                       "multiple",
@@ -287,6 +368,19 @@ export function PrintPage({ id }: { id: string }) {
 }
 
 function printKey(q: Question) {
+  if (q.type === "selection" && q.selections?.length)
+    return q.selections
+      .map(
+        (s, i) =>
+          `Blank ${i + 1}: ${s.choices
+            .filter((c) => c.correct)
+            .map(
+              (c) =>
+                `${String.fromCharCode(65 + s.choices.indexOf(c))}. ${c.text}`,
+            )
+            .join(", ")}`,
+      )
+      .join("; ");
   if (["multiple", "truefalse", "selection", "checklist"].includes(q.type))
     return q.choices
       .map((c, i) =>

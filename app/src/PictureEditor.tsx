@@ -5,6 +5,8 @@ type Stroke = { color: string; points: Point[] };
 type Recipe = {
   angle: number;
   flip: boolean;
+  flipY: boolean;
+  annotations: { text: string; x: number; y: number; color: string }[];
   brightness: number;
   contrast: number;
   crop: number;
@@ -21,6 +23,8 @@ type Recipe = {
 const initial: Recipe = {
   angle: 0,
   flip: false,
+  flipY: false,
+  annotations: [],
   brightness: 100,
   contrast: 100,
   crop: 100,
@@ -61,13 +65,40 @@ export function PictureEditor({
           ...initial,
           angle: range(v.angle, 0, 270, 0),
           flip: v.flip === true,
+          flipY: v.flipY === true,
+          annotations: Array.isArray(v.annotations)
+            ? v.annotations
+                .slice(0, 10)
+                .map(
+                  (a: {
+                    text?: string;
+                    x?: number;
+                    y?: number;
+                    color?: string;
+                  }) => ({
+                    text: String(a.text || "").slice(0, 150),
+                    x: range(a.x, 0, 80, 10),
+                    y: range(a.y, 5, 95, 10),
+                    color: /^#[0-9a-f]{6}$/i.test(a.color || "")
+                      ? a.color!
+                      : initial.color,
+                  }),
+                )
+            : [],
           brightness: range(v.brightness, 30, 170, 100),
           contrast: range(v.contrast, 30, 170, 100),
           crop: range(v.crop, 10, 100, 100),
           cropX: range(v.cropX, 0, 100, 50),
           cropY: range(v.cropY, 0, 100, 50),
           width: range(v.width, 100, 1600, 800),
-          effect: ["none", "grayscale", "sepia"].includes(v.effect)
+          effect: [
+            "none",
+            "grayscale",
+            "sepia",
+            "invert",
+            "saturated",
+            "soft",
+          ].includes(v.effect)
             ? v.effect
             : "none",
           annotation:
@@ -101,7 +132,16 @@ export function PictureEditor({
   const canvas = useRef<HTMLCanvasElement>(null),
     active = useRef(false),
     paintedRecipe = useRef("");
-  const set = (p: Partial<Recipe>) => setR((x) => ({ ...x, ...p }));
+  const [past, setPast] = useState<Recipe[]>([]),
+    [future, setFuture] = useState<Recipe[]>([]);
+  const remember = () => {
+    setPast((x) => [...x, r].slice(-30));
+    setFuture([]);
+  };
+  const set = (p: Partial<Recipe>) => {
+    remember();
+    setR((x) => ({ ...x, ...p }));
+  };
   useEffect(() => {
     setReady(false);
     let live = true;
@@ -123,8 +163,8 @@ export function PictureEditor({
       ctx.save();
       ctx.translate(c.width / 2, c.height / 2);
       ctx.rotate((r.angle * Math.PI) / 180);
-      ctx.scale(r.flip ? -1 : 1, 1);
-      ctx.filter = `brightness(${r.brightness}%) contrast(${r.contrast}%) ${r.effect === "grayscale" ? "grayscale(1)" : r.effect === "sepia" ? "sepia(1)" : ""}`;
+      ctx.scale(r.flip ? -1 : 1, r.flipY ? -1 : 1);
+      ctx.filter = `brightness(${r.brightness}%) contrast(${r.contrast}%) ${r.effect === "grayscale" ? "grayscale(1)" : r.effect === "sepia" ? "sepia(1)" : r.effect === "invert" ? "invert(1)" : r.effect === "saturated" ? "saturate(2)" : r.effect === "soft" ? "blur(2px)" : ""}`;
       const dw = rotated ? c.height : c.width,
         dh = rotated ? c.width : c.height;
       ctx.drawImage(
@@ -150,6 +190,11 @@ export function PictureEditor({
             : ctx.moveTo(p.x * c.width, p.y * c.height),
         );
         ctx.stroke();
+      }
+      for (const a of r.annotations) {
+        ctx.fillStyle = a.color;
+        ctx.font = `${Math.max(18, c.width / 28)}px sans-serif`;
+        ctx.fillText(a.text, (c.width * a.x) / 100, (c.height * a.y) / 100);
       }
       if (r.annotation) {
         ctx.fillStyle = r.color;
@@ -199,11 +244,13 @@ export function PictureEditor({
           }}
           onPointerDown={(e) => {
             if (!drawing || r.strokes.length >= 20) return;
+            const firstPoint = point(e);
+            remember();
             active.current = true;
             e.currentTarget.setPointerCapture(e.pointerId);
             setR((x) => ({
               ...x,
-              strokes: [...x.strokes, { color: x.color, points: [point(e)] }],
+              strokes: [...x.strokes, { color: x.color, points: [firstPoint] }],
             }));
           }}
           onPointerMove={(e) => {
@@ -228,7 +275,32 @@ export function PictureEditor({
           Rotate 90°
         </Button>
         <Button secondary onClick={() => set({ flip: !r.flip })}>
-          Flip
+          Flip horizontally
+        </Button>
+        <Button secondary onClick={() => set({ flipY: !r.flipY })}>
+          Flip vertically
+        </Button>
+        <Button
+          secondary
+          disabled={!past.length}
+          onClick={() => {
+            setFuture((x) => [r, ...x].slice(0, 30));
+            setR(past.at(-1)!);
+            setPast(past.slice(0, -1));
+          }}
+        >
+          Undo edit
+        </Button>
+        <Button
+          secondary
+          disabled={!future.length}
+          onClick={() => {
+            setPast((x) => [...x, r].slice(-30));
+            setR(future[0]);
+            setFuture(future.slice(1));
+          }}
+        >
+          Redo edit
         </Button>
         <Button secondary onClick={() => setDrawing(!drawing)}>
           {drawing ? "Finish drawing" : "Draw on picture"}
@@ -240,7 +312,13 @@ export function PictureEditor({
         >
           Undo stroke
         </Button>
-        <Button secondary onClick={() => setR(initial)}>
+        <Button
+          secondary
+          onClick={() => {
+            remember();
+            setR(initial);
+          }}
+        >
           Reset to original
         </Button>
       </div>
@@ -298,6 +376,9 @@ export function PictureEditor({
             <option value="none">Original colors</option>
             <option value="grayscale">Black and white</option>
             <option value="sepia">Sepia</option>
+            <option value="invert">Invert colors</option>
+            <option value="saturated">Vivid colors</option>
+            <option value="soft">Soft blur</option>
           </select>
         </label>
         <label>
@@ -366,6 +447,85 @@ export function PictureEditor({
           </label>
         </div>
       )}
+      <Button
+        secondary
+        disabled={!r.annotation || r.annotations.length >= 10}
+        onClick={() =>
+          set({
+            annotations: [
+              ...r.annotations,
+              { text: r.annotation, x: r.textX, y: r.textY, color: r.color },
+            ],
+            annotation: "",
+            textY: Math.min(95, r.textY + 10),
+          })
+        }
+      >
+        Keep this label and add another
+      </Button>
+      {r.annotations.map((a, i) => (
+        <fieldset key={i}>
+          <legend>Label {i + 1}</legend>
+          <label>
+            Text
+            <input
+              value={a.text}
+              maxLength={150}
+              onChange={(e) =>
+                set({
+                  annotations: r.annotations.map((v, j) =>
+                    i === j ? { ...v, text: e.target.value } : v,
+                  ),
+                })
+              }
+            />
+          </label>
+          <label>
+            Horizontal position
+            <input
+              type="range"
+              min={0}
+              max={80}
+              value={a.x}
+              onChange={(e) =>
+                set({
+                  annotations: r.annotations.map((v, j) =>
+                    i === j ? { ...v, x: Number(e.target.value) } : v,
+                  ),
+                })
+              }
+            />
+          </label>
+          <label>
+            Vertical position
+            <input
+              type="range"
+              min={5}
+              max={95}
+              value={a.y}
+              onChange={(e) =>
+                set({
+                  annotations: r.annotations.map((v, j) =>
+                    i === j ? { ...v, y: Number(e.target.value) } : v,
+                  ),
+                })
+              }
+            />
+          </label>
+          <button
+            className="text-button"
+            onClick={() =>
+              set({ annotations: r.annotations.filter((_, j) => j !== i) })
+            }
+          >
+            Remove label
+          </button>
+        </fieldset>
+      ))}
+      <p className="hint">
+        Undo and redo keep the last 30 edits while this editor is open. Saved
+        labels and effects reopen with the picture.
+      </p>
       {error && <p role="alert">{error}</p>}
       <div className="modal-actions">
         <Button

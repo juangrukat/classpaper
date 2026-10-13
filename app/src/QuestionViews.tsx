@@ -30,6 +30,10 @@ export function PreviewQuestion({
     category: q.category,
     image: q.image,
     group: q.group,
+    selections: (q.selections || []).map((s) => ({
+      id: s.id,
+      choices: s.choices.map(({ id, text }) => ({ id, text })),
+    })),
     choices: q.choices.map(({ id, text }) => ({ id, text })),
     table: (q.table || []).map((row) =>
       row.map((c) => ({ ...c, text: c.blank ? "" : c.text })),
@@ -68,9 +72,16 @@ export function PreviewQuestion({
         <QuestionText
           q={q}
           slot={
-            q.type === "selection" ? (
-              <InlineChoice q={publicQ} value={value} change={setValue} />
-            ) : undefined
+            q.type === "selection"
+              ? (index: number) => (
+                  <InlineChoice
+                    q={publicQ}
+                    index={index}
+                    value={value}
+                    change={setValue}
+                  />
+                )
+              : undefined
           }
         />
       </div>
@@ -255,22 +266,39 @@ export function ResponseInput({
 
 export function InlineChoice({
   q,
+  index = 0,
   value,
   change,
 }: {
   q: PublicQuestion;
+  index?: number;
   value: ResponseValue | undefined;
   change: (v: ResponseValue) => void;
 }) {
+  const selection = q.selections?.[index];
+  const values =
+    value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return (
     <select
       className="inline-select"
-      aria-label="Choose the missing word"
-      value={typeof value === "string" ? value : ""}
-      onChange={(e) => change(e.target.value)}
+      aria-label={`Choose missing word ${index + 1}`}
+      value={
+        selection
+          ? values[selection.id] || ""
+          : typeof value === "string"
+            ? value
+            : ""
+      }
+      onChange={(e) =>
+        change(
+          selection
+            ? { ...values, [selection.id]: e.target.value }
+            : e.target.value,
+        )
+      }
     >
       <option value="">Choose…</option>
-      {q.choices.map((c) => (
+      {(selection?.choices || q.choices).map((c) => (
         <option key={c.id} value={c.id}>
           {c.text}
         </option>

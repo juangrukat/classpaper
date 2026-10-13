@@ -27,20 +27,23 @@ export function QuestionText({
   slot,
 }: {
   q: Pick<Question | PublicQuestion, "text" | "richText">;
-  slot?: React.ReactNode;
+  slot?: React.ReactNode | ((index: number) => React.ReactNode);
 }) {
   if (slot) {
     const html = q.richText
       ? cleanHtml(q.richText)
       : `<p>${q.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`;
     const doc = new DOMParser().parseFromString(html, "text/html");
+    let slotIndex = 0;
     const render = (n: Node, key: number): React.ReactNode => {
       if (n.nodeType === Node.TEXT_NODE)
         return (n.textContent || "")
           .split(/(___)/g)
           .map((part, i) =>
             part === "___" ? (
-              <React.Fragment key={i}>{slot}</React.Fragment>
+              <React.Fragment key={i}>
+                {typeof slot === "function" ? slot(slotIndex++) : slot}
+              </React.Fragment>
             ) : (
               part
             ),

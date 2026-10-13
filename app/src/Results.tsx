@@ -21,7 +21,17 @@ export function Results() {
     [data, setData] = useState<ResultSet | null>(null),
     [review, setReview] = useState<ResultAttempt | null>(null),
     [error, setError] = useState(""),
-    [copied, setCopied] = useState(false);
+    [copied, setCopied] = useState(false),
+    [statistics, setStatistics] = useState<
+      {
+        id: string;
+        text: string;
+        graded: number;
+        pending: number;
+        percent: number | null;
+      }[]
+    >([]),
+    [recovery, setRecovery] = useState("");
   const load = () =>
     api<typeof publications>("/results")
       .then(setPublications)
@@ -32,6 +42,7 @@ export function Results() {
   const detail = async (code: string) => {
     setSelected(code);
     setData(await api<ResultSet>(`/results/${code}`));
+    setStatistics(await api<typeof statistics>(`/results/${code}/statistics`));
   };
   function csv() {
     if (!data) return;
@@ -172,6 +183,37 @@ export function Results() {
                       </Button>
                     )}
                   </div>
+                  {!!statistics.length && (
+                    <details>
+                      <summary>Question statistics</summary>
+                      <p>
+                        Average marks among graded responses. Pending teacher
+                        grades are excluded.
+                      </p>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Question</th>
+                            <th>Graded</th>
+                            <th>Pending</th>
+                            <th>Average</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {statistics.map((r) => (
+                            <tr key={r.id}>
+                              <td>{r.text}</td>
+                              <td>{r.graded}</td>
+                              <td>{r.pending}</td>
+                              <td>
+                                {r.percent === null ? "—" : `${r.percent}%`}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  )}
                   {!data.attempts.length ? (
                     <p className="muted">
                       Waiting for your first student. Share the link to get
@@ -216,7 +258,10 @@ export function Results() {
                               <td>
                                 <button
                                   className="text-button"
-                                  onClick={() => setReview(a)}
+                                  onClick={() => {
+                                    setRecovery("");
+                                    setReview(a);
+                                  }}
                                 >
                                   Review
                                   <ChevronRight size={15} />
@@ -240,6 +285,58 @@ export function Results() {
           wide
           onClose={() => setReview(null)}
         >
+          {review.status === "active" && (
+            <section className="grade-review">
+              <h3>Help this student finish</h3>
+              <div className="actions">
+                <Button
+                  secondary
+                  disabled={!review.deadline}
+                  onClick={async () => {
+                    try {
+                      await api(
+                        `/results/${selected}/${review.id}/extend`,
+                        send("POST", { minutes: 15 }),
+                      );
+                      await detail(selected);
+                      setError("");
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                >
+                  Add 15 minutes
+                </Button>
+                <Button
+                  secondary
+                  onClick={async () => {
+                    try {
+                      const r = await api<{ recoveryCode: string }>(
+                        `/results/${selected}/${review.id}/recovery`,
+                        send("POST"),
+                      );
+                      setRecovery(r.recoveryCode);
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                >
+                  Create device recovery code
+                </Button>
+              </div>
+              {recovery && (
+                <label>
+                  Single-use code · expires in 15 minutes
+                  <input
+                    readOnly
+                    value={recovery}
+                    onFocus={(e) => e.target.select()}
+                  />
+                </label>
+              )}
+              <ErrorBox error={error} />
+            </section>
+          )}
           {review.questions.map((q, i) => (
             <GradeReview
               key={q.id}
@@ -250,6 +347,11 @@ export function Results() {
               onSave={async () => {
                 const d = await api<ResultSet>(`/results/${selected}`);
                 setData(d);
+                setStatistics(
+                  await api<typeof statistics>(
+                    `/results/${selected}/statistics`,
+                  ),
+                );
                 setReview(d.attempts.find((a) => a.id === review.id) || null);
               }}
             />
@@ -278,7 +380,11 @@ export function GradeReview({
     ),
     [feedback, setFeedback] = useState(a.overrides[q.id]?.feedback || ""),
     [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [parts, setParts] = useState<Record<string, number>>(
+      a.overrides[q.id]?.parts ||
+        Object.fromEntries(q.pairs.map((p) => [p.id, 0])),
+    );
   const raw = a.responses[q.id];
   let response = "No answer";
   if (typeof raw === "string")
@@ -292,6 +398,13 @@ export function GradeReview({
           v,
       )
       .join(", ");
+  else if (raw && q.type === "selection" && q.selections?.length)
+    response = q.selections
+      .map(
+        (s, i) =>
+          `Blank ${i + 1}: ${s.choices.find((c) => c.id === raw[s.id])?.text || "No answer"}`,
+      )
+      .join("; ");
   else if (raw && q.type === "diagram")
     response = raw.text || "Diagram attached";
   else if (raw && q.type === "table")
@@ -334,6 +447,28 @@ export function GradeReview({
       </p>
       {a.status === "submitted" && (
         <>
+          {q.type === "multipart" && (
+            <fieldset>
+              <legend>Grade each part</legend>
+              {q.pairs.map((p, i) => (
+                <label key={p.id}>
+                  Part {i + 1}: {p.left} ({p.marks ?? 1} marks)
+                  <input
+                    type="number"
+                    min={0}
+                    max={p.marks ?? 1}
+                    step="any"
+                    value={parts[p.id] ?? 0}
+                    onChange={(e) => {
+                      const next = { ...parts, [p.id]: Number(e.target.value) };
+                      setParts(next);
+                      setEarned(Object.values(next).reduce((s, v) => s + v, 0));
+                    }}
+                  />
+                </label>
+              ))}
+            </fieldset>
+          )}
           <div className="form-grid">
             <label>
               Marks earned
@@ -342,6 +477,7 @@ export function GradeReview({
                 min={0}
                 max={q.marks}
                 step="any"
+                readOnly={q.type === "multipart"}
                 value={earned}
                 onChange={(e) => setEarned(Number(e.target.value))}
               />
@@ -363,7 +499,12 @@ export function GradeReview({
               try {
                 await api(
                   `/results/${code}/${a.id}/grade`,
-                  send("PUT", { questionId: q.id, earned, feedback }),
+                  send("PUT", {
+                    questionId: q.id,
+                    earned,
+                    feedback,
+                    ...(q.type === "multipart" ? { parts } : {}),
+                  }),
                 );
                 await onSave();
               } catch (e) {

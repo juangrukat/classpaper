@@ -1,3 +1,4 @@
+import { AccountAdmin, ResetPassword } from "./Account";
 import {
   BarChart3,
   FileText,
@@ -5,7 +6,14 @@ import {
   Library,
   LogOut,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { api, send } from "./api";
 const Auth = lazy(() => import("./Auth").then((m) => ({ default: m.Auth })));
@@ -34,7 +42,9 @@ export function App() {
       user: User | null;
       setup: boolean;
     } | null>(null),
-    [view, setView] = useState<"tests" | "bank" | "results">("tests"),
+    [view, setView] = useState<"tests" | "bank" | "results" | "accounts">(
+      "tests",
+    ),
     [testId, setTestId] = useState<string | null>(null),
     [error, setError] = useState("");
   const path = window.location.pathname;
@@ -44,6 +54,7 @@ export function App() {
         .then(setAuth)
         .catch((e) => setError(e.message));
   }, []);
+  if (path === "/reset") return <ResetPassword />;
   if (path.startsWith("/take/")) return <Student code={path.split("/")[2]} />;
   if (error)
     return (
@@ -93,6 +104,16 @@ export function App() {
               {view === v && <span className="nav-dot" />}
             </button>
           ))}
+          {auth.user.admin && (
+            <button
+              onClick={() => {
+                setView("accounts");
+                setTestId(null);
+              }}
+            >
+              Teacher accounts
+            </button>
+          )}
         </nav>
         <div className="sidebar-note">
           <span className="tiny-label">LESS ADMIN. MORE TEACHING.</span>
@@ -132,6 +153,8 @@ export function App() {
           <Dashboard user={auth.user} open={setTestId} />
         ) : view === "bank" ? (
           <Bank />
+        ) : view === "accounts" ? (
+          <AccountAdmin />
         ) : (
           <Results />
         )}
@@ -139,4 +162,43 @@ export function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+class AppBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? (
+      <div className="auth-wrap">
+        <div className="auth-card">
+          <Brand />
+          <h1>Let’s reopen your workspace.</h1>
+          <p>
+            The app may have been updated. Reload to continue with your saved
+            work.
+          </p>
+          <Button onClick={() => location.reload()}>Reload Classpaper</Button>
+        </div>
+      </div>
+    ) : (
+      this.props.children
+    );
+  }
+}
+createRoot(document.getElementById("root")!).render(
+  <AppBoundary>
+    <Suspense
+      fallback={
+        <div className="loading">
+          <Brand />
+          <p>Opening…</p>
+        </div>
+      }
+    >
+      <App />
+    </Suspense>
+  </AppBoundary>,
+);

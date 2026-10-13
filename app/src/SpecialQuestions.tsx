@@ -1,3 +1,4 @@
+import { PictureEditor } from "./PictureEditor";
 import { useState } from "react";
 import type { PublicQuestion, Question, ResponseValue } from "./domain";
 export const specialKinds = [
@@ -275,7 +276,8 @@ export function SpecialResponse({
 }) {
   const values =
     value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const [error, setError] = useState("");
+  const [error, setError] = useState(""),
+    [drawing, setDrawing] = useState(false);
   if (q.type === "diagram")
     return (
       <div>
@@ -306,6 +308,25 @@ export function SpecialResponse({
             }}
           />
         </label>
+        <button className="text-button" onClick={() => setDrawing(true)}>
+          Draw or annotate my answer
+        </button>
+        {drawing && (
+          <PictureEditor
+            source={values.image || q.image || blankDrawing()}
+            onClose={() => setDrawing(false)}
+            onSave={(image) => {
+              if (image.length > 400000) {
+                setError(
+                  "Drawing is too large. Reduce its width and try again.",
+                );
+                return;
+              }
+              change({ ...values, image });
+              setDrawing(false);
+            }}
+          />
+        )}
         {values.image && (
           <img
             className="student-image"
@@ -439,4 +460,14 @@ export function SpecialPrint({
       </div>
     );
   return null;
+}
+
+function blankDrawing() {
+  const c = document.createElement("canvas");
+  c.width = 800;
+  c.height = 500;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, c.width, c.height);
+  return c.toDataURL("image/png");
 }

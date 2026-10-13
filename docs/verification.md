@@ -4,7 +4,7 @@ The app is a functional local release, not a claim of complete Schoolhouse parit
 
 ## Checked
 
-- TypeScript production build and 28 passing automated checks.
+- TypeScript production build and 32 passing automated checks.
 - Domain grading, multiple-answer duplicates, locked/grouped shuffling and choice limits.
 - Active student projections omit answers, teacher notes, original pictures/recipes, list guides, part guides and hidden table cell values.
 - Native ZIP round trip; GIFT reserved characters/Unicode, weighted/malformed input; CSV quoting, mapping, no-heading files and BOM.
@@ -41,3 +41,7 @@ The app is a functional local release, not a claim of complete Schoolhouse parit
 An independently authored six-question GIFT fixture exercised file dispatch for multiple choice, true/false, short answer alternatives, essay, matching and numerical questions. All answer mappings and category retention passed. The browser upload showed six valid questions with expected answers and title-loss warnings; warnings were acknowledged and the questions were imported into a separate preview test. Screenshot: `docs/screenshots/gift-import.jpg`.
 
 A clone does not include extracted proprietary samples. The corresponding optional migration test skips when those local files are absent; the remaining 27 checks are self-contained.
+
+## Production completion pass
+
+See [production verification](production/verification.md) for the container/PostgreSQL/restore, recovery, grading, PDF and concurrency evidence. The original limitations above describe the initial pass; deployment, restore, representative print layouts and account/classroom controls have since been checked. Real phone scans and representative human usability testing remain open. Backlog: [24 of 30 outcomes complete](production/backlog.md).

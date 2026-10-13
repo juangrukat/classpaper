@@ -122,6 +122,10 @@ export function Brand() {
 }
 
 export function answerText(q: Question) {
+  if (q.type === "selection" && q.selections?.length)
+    return q.selections
+      .map((s) => s.choices.find((c) => c.correct)?.text || "")
+      .join("; ");
   if (["multiple", "truefalse", "selection", "checklist"].includes(q.type))
     return q.choices
       .filter((c) => c.correct)

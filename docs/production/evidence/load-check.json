@@ -1,0 +1,7 @@
+{
+  "students": 50,
+  "parallelStartSaveSubmit": true,
+  "failedRequests": 0,
+  "elapsedMs": 1302,
+  "environment": "Podman ARM64, PostgreSQL 17, app memory cap 1 GB"
+}

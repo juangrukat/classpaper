@@ -26,7 +26,8 @@ export function Dashboard({
     [showNew, setShowNew] = useState(false),
     [title, setTitle] = useState(""),
     [error, setError] = useState(""),
-    [importing, setImporting] = useState(false);
+    [importing, setImporting] = useState(false),
+    [showSources, setShowSources] = useState(false);
   const load = () =>
     api<TestSummary[]>("/tests")
       .then(setTests)
@@ -249,6 +250,10 @@ export function Dashboard({
           </form>
         </Modal>
       )}
+      <button className="text-button" onClick={() => setShowSources(true)}>
+        Original import files
+      </button>
+      {showSources && <SourceArchive onClose={() => setShowSources(false)} />}
       {importing && (
         <ImportDialog
           onClose={() => setImporting(false)}
@@ -331,17 +336,20 @@ export function ImportDialog({
   return (
     <Modal title="Bring your questions with you" wide onClose={onClose}>
       <p className="muted">
-        Choose a file. We’ll show you what’s inside before adding anything.
+        Choose a file. We’ll show you what’s inside before adding anything. The
+        original is retained privately in your import archive.
       </p>
       <label className="dropzone">
         <Upload size={29} />
         <strong>
           {busy ? "Reading your questions…" : name || "Choose a question file"}
         </strong>
-        <span>GIFT · CSV / TSV · Classpaper / QTI ZIP · Schoolhouse 5 TST</span>
+        <span>
+          GIFT / Aiken · CSV / TSV · Classpaper / QTI ZIP · Schoolhouse 5 TST
+        </span>
         <input
           type="file"
-          accept=".gift,.txt,.csv,.tsv,.zip,.json,.tst,.xml"
+          accept=".gift,.aiken,.txt,.csv,.tsv,.zip,.json,.tst,.xml"
           disabled={busy}
           onChange={(e) => e.target.files?.[0] && read(e.target.files[0])}
         />
@@ -524,6 +532,34 @@ export function ImportDialog({
           </div>
         </>
       )}
+    </Modal>
+  );
+}
+
+function SourceArchive({ onClose }: { onClose: () => void }) {
+  const [rows, setRows] = useState<
+      { id: string; name: string; created_at: string }[]
+    >([]),
+    [error, setError] = useState("");
+  useEffect(() => {
+    api<typeof rows>("/import/sources")
+      .then(setRows)
+      .catch((e) => setError(e.message));
+  }, []);
+  return (
+    <Modal title="Original import files" onClose={onClose}>
+      <p>
+        Download an unchanged source when checking a migration. Only your
+        workspace can access these files.
+      </p>
+      <ErrorBox error={error} />
+      {!rows.length && <p>No retained files yet.</p>}
+      {rows.map((r) => (
+        <p key={r.id}>
+          <a href={`/api/import/sources/${r.id}`}>{r.name}</a> ·{" "}
+          {new Date(r.created_at).toLocaleDateString()}
+        </p>
+      ))}
     </Modal>
   );
 }

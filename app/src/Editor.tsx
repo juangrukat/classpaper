@@ -1,3 +1,4 @@
+import { InlineEditor } from "./InlineEditor";
 import { PictureEditor } from "./PictureEditor";
 import {
   ArrowLeft,
@@ -685,6 +686,34 @@ export function SettingsForm({
   const set = (p: Partial<TestSettings>) => change({ ...s, ...p });
   return (
     <>
+      <div className="form-grid">
+        <label>
+          Title layout
+          <select
+            value={s.titleStyle}
+            onChange={(e) =>
+              set({ titleStyle: e.target.value as TestSettings["titleStyle"] })
+            }
+          >
+            <option value="classic">Classic classroom</option>
+            <option value="compact">Compact heading</option>
+            <option value="exam">Formal exam</option>
+          </select>
+        </label>
+        <label>
+          Answer-sheet layout
+          <select
+            value={s.sheetStyle}
+            onChange={(e) =>
+              set({ sheetStyle: e.target.value as TestSettings["sheetStyle"] })
+            }
+          >
+            <option value="standard">Standard</option>
+            <option value="compact">Compact</option>
+            <option value="lined">Extra writing space</option>
+          </select>
+        </label>
+      </div>
       <div className="form-divider">ONLINE TESTING</div>
       <div className="form-grid">
         <label>
@@ -728,7 +757,15 @@ export function SettingsForm({
           checked={s.shuffleQuestions}
           onChange={(e) => set({ shuffleQuestions: e.target.checked })}
         />
-        Shuffle question order (keep adjacent groups together)
+        Shuffle group order and ungrouped questions
+      </label>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={s.shuffleWithinGroups}
+          onChange={(e) => set({ shuffleWithinGroups: e.target.checked })}
+        />
+        Shuffle questions inside each group
       </label>
       <label className="check-row">
         <input
@@ -884,6 +921,7 @@ export function QuestionEditor({
           You can also type ___ to add a blank.
         </small>
       )}
+      {q.type === "selection" && <InlineEditor q={q} change={set} />}
       {q.image ? (
         <div className="question-image">
           <img src={q.image} alt={q.imageAlt || "Question illustration"} />
@@ -940,121 +978,126 @@ export function QuestionEditor({
         </label>
       )}
       <ErrorBox error={uploadError} />
-      {["multiple", "truefalse", "selection", "checklist"].includes(q.type) && (
-        <div className="choices-editor">
-          <div className="field-heading">
-            <strong>Answer choices</strong>
-            <span>Tick every correct answer</span>
-          </div>
-          {q.choices.map((c, i) => (
-            <div
-              className={`choice-edit ${c.correct ? "correct" : ""}`}
-              key={c.id}
-            >
-              <label className="correct-control" title="Correct answer">
+      {["multiple", "truefalse", "selection", "checklist"].includes(q.type) &&
+        !q.selections?.length && (
+          <div className="choices-editor">
+            <div className="field-heading">
+              <strong>Answer choices</strong>
+              <span>Tick every correct answer</span>
+            </div>
+            {q.choices.map((c, i) => (
+              <div
+                className={`choice-edit ${c.correct ? "correct" : ""}`}
+                key={c.id}
+              >
+                <label className="correct-control" title="Correct answer">
+                  <input
+                    type="checkbox"
+                    aria-label={`Choice ${i + 1} is correct`}
+                    checked={c.correct}
+                    onChange={(e) =>
+                      set({
+                        choices: q.choices.map((x) =>
+                          x.id === c.id
+                            ? { ...x, correct: e.target.checked }
+                            : q.type === "truefalse" || q.type === "selection"
+                              ? { ...x, correct: false }
+                              : x,
+                        ),
+                      })
+                    }
+                  />
+                  <span>
+                    {c.correct ? (
+                      <Check size={16} />
+                    ) : (
+                      String.fromCharCode(65 + i)
+                    )}
+                  </span>
+                </label>
                 <input
-                  type="checkbox"
-                  aria-label={`Choice ${i + 1} is correct`}
-                  checked={c.correct}
+                  aria-label={`Answer choice ${i + 1}`}
+                  value={c.text}
+                  readOnly={q.type === "truefalse"}
                   onChange={(e) =>
                     set({
                       choices: q.choices.map((x) =>
-                        x.id === c.id
-                          ? { ...x, correct: e.target.checked }
-                          : q.type === "truefalse" || q.type === "selection"
-                            ? { ...x, correct: false }
-                            : x,
+                        x.id === c.id ? { ...x, text: e.target.value } : x,
                       ),
                     })
                   }
+                  placeholder={`Choice ${String.fromCharCode(65 + i)}`}
                 />
-                <span>
-                  {c.correct ? (
-                    <Check size={16} />
-                  ) : (
-                    String.fromCharCode(65 + i)
-                  )}
-                </span>
-              </label>
-              <input
-                aria-label={`Answer choice ${i + 1}`}
-                value={c.text}
-                readOnly={q.type === "truefalse"}
-                onChange={(e) =>
-                  set({
-                    choices: q.choices.map((x) =>
-                      x.id === c.id ? { ...x, text: e.target.value } : x,
-                    ),
-                  })
-                }
-                placeholder={`Choice ${String.fromCharCode(65 + i)}`}
-              />
+                <button
+                  className="icon"
+                  aria-label={
+                    c.locked
+                      ? "Allow choice to shuffle"
+                      : "Keep choice in this position"
+                  }
+                  title={
+                    c.locked
+                      ? "Position locked"
+                      : "Lock position when shuffling"
+                  }
+                  onClick={() =>
+                    set({
+                      choices: q.choices.map((x) =>
+                        x.id === c.id ? { ...x, locked: !x.locked } : x,
+                      ),
+                    })
+                  }
+                >
+                  {c.locked ? <Lock size={15} /> : <Unlock size={15} />}
+                </button>
+                {q.type !== "truefalse" && (
+                  <button
+                    className="icon"
+                    aria-label="Remove choice"
+                    disabled={q.choices.length <= 2}
+                    onClick={() =>
+                      set({ choices: q.choices.filter((x) => x.id !== c.id) })
+                    }
+                  >
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {q.type !== "truefalse" && (
               <button
-                className="icon"
-                aria-label={
-                  c.locked
-                    ? "Allow choice to shuffle"
-                    : "Keep choice in this position"
-                }
-                title={
-                  c.locked ? "Position locked" : "Lock position when shuffling"
-                }
+                className="text-button add-choice"
                 onClick={() =>
                   set({
-                    choices: q.choices.map((x) =>
-                      x.id === c.id ? { ...x, locked: !x.locked } : x,
-                    ),
+                    choices: [
+                      ...q.choices,
+                      {
+                        id: crypto.randomUUID(),
+                        text: "",
+                        correct: false,
+                        locked: false,
+                      },
+                    ],
                   })
                 }
               >
-                {c.locked ? <Lock size={15} /> : <Unlock size={15} />}
+                <Plus size={16} />
+                Add another choice
               </button>
-              {q.type !== "truefalse" && (
-                <button
-                  className="icon"
-                  aria-label="Remove choice"
-                  disabled={q.choices.length <= 2}
-                  onClick={() =>
-                    set({ choices: q.choices.filter((x) => x.id !== c.id) })
-                  }
-                >
-                  <X size={15} />
-                </button>
-              )}
+            )}
+            <div className="answer-hint">
+              <CheckCircle2 size={16} />
+              {q.choices.some((c) => c.correct)
+                ? `Correct answer${q.choices.filter((c) => c.correct).length > 1 ? "s" : ""}: ${q.choices
+                    .map((c, i) =>
+                      c.correct ? String.fromCharCode(65 + i) : "",
+                    )
+                    .filter(Boolean)
+                    .join(", ")}`
+                : "Mark the correct answer so we can grade it for you."}
             </div>
-          ))}
-          {q.type !== "truefalse" && (
-            <button
-              className="text-button add-choice"
-              onClick={() =>
-                set({
-                  choices: [
-                    ...q.choices,
-                    {
-                      id: crypto.randomUUID(),
-                      text: "",
-                      correct: false,
-                      locked: false,
-                    },
-                  ],
-                })
-              }
-            >
-              <Plus size={16} />
-              Add another choice
-            </button>
-          )}
-          <div className="answer-hint">
-            <CheckCircle2 size={16} />
-            {q.choices.some((c) => c.correct)
-              ? `Correct answer${q.choices.filter((c) => c.correct).length > 1 ? "s" : ""}: ${q.choices
-                  .map((c, i) => (c.correct ? String.fromCharCode(65 + i) : ""))
-                  .filter(Boolean)
-                  .join(", ")}`
-              : "Mark the correct answer so we can grade it for you."}
           </div>
-        </div>
-      )}
+        )}
       {specialKinds.includes(q.type) && <SpecialEditor q={q} change={set} />}
       {["short", "essay", "blanks", "numerical"].includes(q.type) && (
         <div className="answer-editor">
@@ -1330,6 +1373,7 @@ export function ExportDialog({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [ack, setAck] = useState(false);
+  const [exportFormat, setExportFormat] = useState("gift");
   const [qti, setQti] = useState<string[] | null>(null),
     [qtiAck, setQtiAck] = useState(false);
   async function saveQti() {
@@ -1381,6 +1425,8 @@ export function ExportDialog({
         onClick={async () => {
           try {
             if (!(await ensureSaved())) return;
+            setAck(false);
+            setExportFormat("gift");
             setGift(await api(`/tests/${doc.id}/export/gift`));
           } catch (e) {
             setError((e as Error).message);
@@ -1448,6 +1494,25 @@ export function ExportDialog({
           </Button>
         </>
       )}
+      <button
+        className="export-option"
+        onClick={async () => {
+          try {
+            if (!(await ensureSaved())) return;
+            setAck(false);
+            setExportFormat("csv");
+            setGift(await api(`/tests/${doc.id}/export/csv`));
+          } catch (e) {
+            setError((e as Error).message);
+          }
+        }}
+      >
+        <strong>Spreadsheet CSV</strong>
+        <small>
+          Supported types · review omitted formatting · import text fields as
+          text
+        </small>
+      </button>
       <p className="fine-print">
         QTI is a defined subset, not universal compatibility. ZipGrade scanning
         validation is still planned.
@@ -1477,12 +1542,12 @@ export function ExportDialog({
             <Button
               disabled={!!gift.warnings.length && !ack}
               onClick={() => {
-                download("questions.gift", gift.text);
+                download(`questions.${exportFormat}`, gift.text);
                 onClose();
               }}
             >
               <Download size={16} />
-              Download GIFT
+              Download {exportFormat.toUpperCase()}
             </Button>
           </div>
         </>
@@ -1530,6 +1595,8 @@ export function LayoutPresets({
                 verticalMarks: p.settings.verticalMarks,
                 backgroundImage: p.settings.backgroundImage,
                 questionSpacing: p.settings.questionSpacing,
+                titleStyle: p.settings.titleStyle || "classic",
+                sheetStyle: p.settings.sheetStyle || "standard",
               });
           }}
         >
