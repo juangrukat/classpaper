@@ -1,0 +1,13 @@
+$CATEGORY: Science
+
+::Closest planet::Which planet is closest to the Sun? {=Mercury ~Venus ~Earth ~Mars}
+
+::Orbit::The Earth orbits the Sun. {TRUE}
+
+::Force::What force keeps planets in orbit? {=Gravity =gravitation}
+
+::Explain::Explain why we experience day and night. {}
+
+::Match::Match each object with its description. {=Sun -> Star =Earth -> Planet =Moon -> Satellite}
+
+::Number::How many minutes are in an hour? {#60:0}
